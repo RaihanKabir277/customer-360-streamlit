@@ -380,13 +380,14 @@ elif page == "📊 Customer Segmentation":
     st.dataframe(cust_list, use_container_width=True, hide_index=True)
     st.caption(f"Showing {len(cust_list)} of {segment_filter if segment_filter != 'All' else 'all'} customers (max 200 rows)")
 
+
 # ════════════════════════════════════════════════════════════════
 # PAGE 4 — PRODUCT RECOMMENDATIONS (Action Board)
 # ════════════════════════════════════════════════════════════════
 elif page == "🎯 Product Recommendations":
     st.title("Customer 360 Profile")
     st.caption("Page 4 of 4 · Product_Recommendations")
-
+ 
     customers = get_customer_list()
     selected = st.selectbox(
         "🔍 Search Customer ID",
@@ -394,52 +395,171 @@ elif page == "🎯 Product Recommendations":
         format_func=lambda x: f"{x} — {customers.loc[customers['customer_id']==x, 'full_name'].values[0]}",
         key="page4_customer"
     )
-
+ 
     if selected:
         with st.spinner("Generating recommendation..."):
-            rec = run_query(f"""
+            rec_df = run_query(f"""
                 SELECT
                     customer_id, full_name, city,
+                    credit_score, credit_category,
+                    total_balance, total_loan_amount, avg_monthly_spending,
+                    total_products, mobile_pct, total_sessions,
+                    missed_payment_pct, engagement_score, churn_risk_score,
+                    customer_value_tier, primary_segment,
+                    has_active_credit_card, avg_payment_completion_pct,
                     mortgage_probability, mortgage_priority,
                     wealth_probability, wealth_priority,
                     credit_card_upgrade_probability, credit_card_priority,
-                    top_recommendation, engagement_score, churn_risk_score,
-
-                    CASE
-                        WHEN churn_risk_score >= 60 THEN '🚨 HIGH CHURN RISK — Prioritise retention over cross-sell'
-                        WHEN churn_risk_score >= 30 THEN '⚠️ MEDIUM CHURN RISK — Lead with value, not product push'
-                        ELSE '✅ LOW CHURN RISK — Good time to introduce new product'
-                    END AS risk_warning,
-
-                    CONCAT(
-                        '🎯 TOP RECOMMENDATION: ', top_recommendation, '\\n\\n',
-                        '📞 WHAT TO SAY TO ', UPPER(full_name), ':\\n',
-                        CASE top_recommendation
-                            WHEN 'Mortgage' THEN
-                                CONCAT('"', full_name, ', based on your strong credit profile, ',
-                                       'you are pre-qualified for our home loan program. ',
-                                       'Would you like to explore our current mortgage rates?"')
-                            WHEN 'Wealth Product' THEN
-                                CONCAT('"', full_name, ', given your financial strength, our wealth ',
-                                       'management team would love to show you investment options. ',
-                                       'Can we schedule a private consultation?"')
-                            ELSE
-                                CONCAT('"', full_name, ', you qualify for a credit card upgrade with ',
-                                       'higher limits and premium rewards. Would you like to hear more?"')
-                        END, '\\n\\n',
-                        '💼 WHY THIS RECOMMENDATION:\\n',
-                        '• Mortgage Score     : ', mortgage_probability, '/100 (', mortgage_priority, ')\\n',
-                        '• Wealth Score       : ', wealth_probability, '/100 (', wealth_priority, ')\\n',
-                        '• Card Upgrade Score : ', credit_card_upgrade_probability, '/100 (', credit_card_priority, ')\\n\\n',
-                        '⚡ BANKER ACTION:\\n',
-                        CASE
-                            WHEN mortgage_priority = 'High' THEN '1. Call within 48 hours — high mortgage conversion probability'
-                            WHEN wealth_priority = 'High' THEN '1. Schedule private wealth consultation this week'
-                            WHEN credit_card_priority = 'High' THEN '1. Send upgrade offer via preferred channel'
-                            ELSE '1. Maintain relationship — quarterly check-in'
-                        END
-                    ) AS banker_action_script
-
+                    top_recommendation
                 FROM customer_360.gold.product_recommendations
                 WHERE customer_id = '{selected}'
-            """).iloc[0]
+            """)
+ 
+        if rec_df.empty:
+            st.warning("No recommendation data found for this customer.")
+        else:
+            rec = rec_df.iloc[0]
+ 
+            # ── Build risk warning in Python (no SQL string escaping issues) ──
+            churn = float(rec["churn_risk_score"])
+            if churn >= 60:
+                risk_warning = "🚨 HIGH CHURN RISK — Prioritise retention over cross-sell"
+            elif churn >= 30:
+                risk_warning = "⚠️ MEDIUM CHURN RISK — Lead with value, not product push"
+            else:
+                risk_warning = "✅ LOW CHURN RISK — Good time to introduce new product"
+ 
+            # ── Build banker script in Python ──────────────────────────────
+            top_rec = rec["top_recommendation"]
+            full_name = rec["full_name"]
+ 
+            if top_rec == "Mortgage":
+                pitch = (f'"{full_name}, based on your strong credit profile, '
+                         f'you are pre-qualified for our home loan program. '
+                         f'Would you like to explore our current mortgage rates?"')
+            elif top_rec == "Wealth Product":
+                pitch = (f'"{full_name}, given your financial strength, our wealth '
+                         f'management team would love to show you investment options. '
+                         f'Can we schedule a private consultation?"')
+            else:
+                pitch = (f'"{full_name}, you qualify for a credit card upgrade with '
+                         f'higher limits and premium rewards. Would you like to hear more?"')
+ 
+            if rec["mortgage_priority"] == "High":
+                action = "1. Call within 48 hours — high mortgage conversion probability"
+            elif rec["wealth_priority"] == "High":
+                action = "1. Schedule private wealth consultation this week"
+            elif rec["credit_card_priority"] == "High":
+                action = "1. Send upgrade offer via preferred channel"
+            else:
+                action = "1. Maintain relationship — quarterly check-in"
+ 
+            banker_action_script = (
+                f"🎯 TOP RECOMMENDATION: {top_rec}\n\n"
+                f"📞 WHAT TO SAY TO {full_name.upper()}:\n{pitch}\n\n"
+                f"💼 WHY THIS RECOMMENDATION:\n"
+                f"• Mortgage Score     : {rec['mortgage_probability']}/100 ({rec['mortgage_priority']})\n"
+                f"• Wealth Score       : {rec['wealth_probability']}/100 ({rec['wealth_priority']})\n"
+                f"• Card Upgrade Score : {rec['credit_card_upgrade_probability']}/100 ({rec['credit_card_priority']})\n\n"
+                f"⚡ BANKER ACTION:\n{action}"
+            )
+ 
+            col_l, col_r = st.columns(2)
+ 
+            with col_l:
+                probs = pd.DataFrame({
+                    "product": ["Mortgage", "Wealth Product", "Credit Card Upgrade"],
+                    "probability": [
+                        rec["mortgage_probability"],
+                        rec["wealth_probability"],
+                        rec["credit_card_upgrade_probability"]
+                    ],
+                    "priority": [
+                        rec["mortgage_priority"],
+                        rec["wealth_priority"],
+                        rec["credit_card_priority"]
+                    ]
+                })
+                priority_colors = {"High": RED, "Medium": ORANGE, "Low": GREEN}
+                fig = px.bar(probs, x="probability", y="product", orientation="h",
+                            color="priority", color_discrete_map=priority_colors,
+                            title="Product Probability for Selected Customer")
+                fig.update_layout(template="plotly_dark", plot_bgcolor="#1A1D24",
+                                  paper_bgcolor="#1A1D24", height=300)
+                st.plotly_chart(fig, use_container_width=True)
+ 
+            with col_r:
+                st.subheader("Banker Recommendation Script")
+                st.markdown(
+                    f"""<div style="background-color:#1A1D24; padding:18px;
+                    border-radius:10px; border:1px solid #2D3139; white-space:pre-wrap;
+                    font-size:13px; line-height:1.6; height:280px; overflow-y:auto;">
+                    {banker_action_script}
+                    </div>""",
+                    unsafe_allow_html=True
+                )
+                st.warning(risk_warning)
+ 
+        st.divider()
+ 
+        # ── Portfolio-level view ─────────────────────────────────
+        st.subheader("Portfolio Overview")
+ 
+        top_recs = run_query("""
+            SELECT top_recommendation, COUNT(*) AS customers
+            FROM customer_360.gold.product_recommendations
+            GROUP BY top_recommendation
+        """)
+ 
+        c1, c2, c3 = st.columns(3)
+        for col, prod in zip([c1, c2, c3], ["Mortgage", "Wealth Product", "Credit Card Upgrade"]):
+            row = top_recs[top_recs["top_recommendation"] == prod]
+            val = int(row["customers"].values[0]) if not row.empty else 0
+            col.metric(f"{prod} Candidates", f"{val:,}")
+ 
+        col_l2, col_r2 = st.columns(2)
+        with col_l2:
+            fig = px.bar(top_recs, x="top_recommendation", y="customers",
+                        color="top_recommendation", title="Top Recommendation Distribution",
+                        color_discrete_sequence=[BLUE, GREEN, ORANGE])
+            fig.update_layout(template="plotly_dark", plot_bgcolor="#1A1D24",
+                              paper_bgcolor="#1A1D24", height=350, showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+ 
+        with col_r2:
+            avg_probs = run_query("""
+                SELECT 'Mortgage' AS product, mortgage_priority AS priority,
+                       AVG(mortgage_probability) AS avg_prob
+                FROM customer_360.gold.product_recommendations
+                GROUP BY mortgage_priority
+                UNION ALL
+                SELECT 'Wealth' AS product, wealth_priority AS priority,
+                       AVG(wealth_probability) AS avg_prob
+                FROM customer_360.gold.product_recommendations
+                GROUP BY wealth_priority
+                UNION ALL
+                SELECT 'Card Upgrade' AS product, credit_card_priority AS priority,
+                       AVG(credit_card_upgrade_probability) AS avg_prob
+                FROM customer_360.gold.product_recommendations
+                GROUP BY credit_card_priority
+            """)
+            priority_colors = {"High": RED, "Medium": ORANGE, "Low": GREEN}
+            fig = px.bar(avg_probs, x="product", y="avg_prob", color="priority",
+                        barmode="group", title="Avg Probability by Product",
+                        color_discrete_map=priority_colors)
+            fig.update_layout(template="plotly_dark", plot_bgcolor="#1A1D24",
+                              paper_bgcolor="#1A1D24", height=350)
+            st.plotly_chart(fig, use_container_width=True)
+ 
+        st.subheader("Customer Product Probability List")
+        full_list = run_query("""
+            SELECT customer_id, full_name, city,
+                   mortgage_probability, mortgage_priority,
+                   wealth_probability, wealth_priority,
+                   credit_card_upgrade_probability, credit_card_priority,
+                   top_recommendation, engagement_score
+            FROM customer_360.gold.product_recommendations
+            ORDER BY mortgage_probability DESC
+            LIMIT 200
+        """)
+        st.dataframe(full_list, use_container_width=True, hide_index=True)
