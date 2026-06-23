@@ -1,8 +1,9 @@
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 from databricks import sql
-
+ 
 # ════════════════════════════════════════════════════════════════
 # PAGE CONFIG
 # ════════════════════════════════════════════════════════════════
@@ -12,7 +13,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
+ 
 # ════════════════════════════════════════════════════════════════
 # DARK THEME STYLING (matches Databricks dashboard look)
 # ════════════════════════════════════════════════════════════════
@@ -34,7 +35,7 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
-
+ 
 # ════════════════════════════════════════════════════════════════
 # DATABRICKS CONNECTION
 # ════════════════════════════════════════════════════════════════
@@ -45,7 +46,7 @@ def get_connection():
         http_path       = st.secrets["DATABRICKS_HTTP_PATH"],
         access_token    = st.secrets["DATABRICKS_TOKEN"]
     )
-
+ 
 @st.cache_data(ttl=600, show_spinner=False)
 def run_query(query: str) -> pd.DataFrame:
     conn = get_connection()
@@ -55,19 +56,19 @@ def run_query(query: str) -> pd.DataFrame:
     data = cursor.fetchall()
     cursor.close()
     return pd.DataFrame(data, columns=cols)
-
+ 
 GREEN  = "#00BC8C"
 RED    = "#E74C3C"
 BLUE   = "#3498DB"
 ORANGE = "#F39C12"
-
+ 
 # ════════════════════════════════════════════════════════════════
 # SIDEBAR — NAVIGATION
 # ════════════════════════════════════════════════════════════════
 st.sidebar.title("🏦 Customer 360 Profile")
 st.sidebar.caption("Enterprise Banking Data Platform · Databricks")
 st.sidebar.divider()
-
+ 
 page = st.sidebar.radio(
     "Navigate",
     [
@@ -77,12 +78,12 @@ page = st.sidebar.radio(
         "🎯 Product Recommendations"
     ]
 )
-
+ 
 st.sidebar.divider()
 st.sidebar.markdown("**Built with:**")
 st.sidebar.markdown("Databricks · Delta Lake · Unity Catalog · Streamlit")
 st.sidebar.markdown("[📁 View source on GitHub](https://github.com/RaihanKabir277/customer-360-databricks)")
-
+ 
 # ════════════════════════════════════════════════════════════════
 # LOAD CUSTOMER LIST ONCE (used across pages)
 # ════════════════════════════════════════════════════════════════
@@ -96,14 +97,14 @@ def get_customer_list():
         ORDER BY full_name
         LIMIT 2000
     """)
-
+ 
 # ════════════════════════════════════════════════════════════════
 # PAGE 1 — CUSTOMER 360 (Individual Profile)
 # ════════════════════════════════════════════════════════════════
 if page == "📋 Customer 360":
     st.title("Customer 360 Profile")
     st.caption("Page 1 of 4 · Customer_360")
-
+ 
     customers = get_customer_list()
     selected = st.selectbox(
         "🔍 Customer ID",
@@ -111,14 +112,14 @@ if page == "📋 Customer 360":
         format_func=lambda x: f"{x} — {customers.loc[customers['customer_id']==x, 'full_name'].values[0]}",
         key="page1_customer"
     )
-
+ 
     if selected:
         with st.spinner("Loading customer profile..."):
             cust = run_query(f"""
                 SELECT * FROM customer_360.gold.customer_360
                 WHERE customer_id = '{selected}'
             """).iloc[0]
-
+ 
         # ── 6 KPI cards ──────────────────────────────────────────
         c1, c2, c3, c4, c5, c6 = st.columns(6)
         c1.metric("Total Balance",    f"${cust['total_balance']:,.0f}")
@@ -127,13 +128,13 @@ if page == "📋 Customer 360":
         c4.metric("Monthly Spend",    f"${cust['avg_monthly_spending']:,.0f}")
         c5.metric("Engagement Score", f"{int(cust['engagement_score'])}")
         c6.metric("Churn Risk Score", f"{int(cust['churn_risk_score'])}")
-
+ 
         st.caption(f"👤 {cust['full_name']} · {cust['city']}")
         st.divider()
-
+ 
         # ── Row 1: Product Holdings | Monthly Spending ──────────
         col_l, col_r = st.columns(2)
-
+ 
         with col_l:
             holdings = run_query(f"""
                 SELECT product_type, amount
@@ -152,7 +153,7 @@ if page == "📋 Customer 360":
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info("No product holdings data available")
-
+ 
         with col_r:
             spending = run_query(f"""
                 SELECT year_month, total_spending
@@ -170,10 +171,10 @@ if page == "📋 Customer 360":
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info("No spending history available")
-
+ 
         # ── Row 2: Channel Usage | Churn Risk Trend ─────────────
         col_l2, col_r2 = st.columns(2)
-
+ 
         with col_l2:
             channels = run_query(f"""
                 SELECT channel, session_pct
@@ -191,7 +192,7 @@ if page == "📋 Customer 360":
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info("No digital activity data available")
-
+ 
         with col_r2:
             churn = run_query(f"""
                 SELECT year_month, monthly_churn_risk_score
@@ -209,53 +210,66 @@ if page == "📋 Customer 360":
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info("No payment history available")
-
+ 
         st.divider()
-
-       # ── Activity Feed ────────────────────────────────────────
+ 
+        # ── Activity Feed ────────────────────────────────────────
         st.subheader("Activity Feed")
         activity = run_query(f"""
-            SELECT
-                CASE
-                    WHEN event_date = current_date()               THEN 'Today'
-                    WHEN event_date = DATE_SUB(current_date(), 1)  THEN 'Yesterday'
-                    WHEN event_date >= DATE_SUB(current_date(), 7) THEN 'This week'
-                    ELSE DATE_FORMAT(event_date, 'dd MMM yyyy')
-                END AS when_label,
-                event_description,
-                amount,
-                direction,
-                channel,
-                event_status,
-                event_category,
-                event_type,
-                event_datetime
+            SELECT when_label, event_description, amount,
+                   direction, channel, event_status,
+                   event_category, event_type, event_datetime
             FROM customer_360.gold.activity_feed
             WHERE customer_id = '{selected}'
             ORDER BY
-                CASE WHEN amount IS NULL THEN 1 ELSE 0 END ASC,
-                event_datetime DESC
+              CASE WHEN amount IS NULL THEN 1 ELSE 0 END ASC,
+              event_datetime DESC
             LIMIT 30
         """)
         if not activity.empty:
             st.dataframe(activity, use_container_width=True, hide_index=True)
         else:
             st.info("No activity recorded for this customer")
-
+ 
 # ════════════════════════════════════════════════════════════════
 # PAGE 2 — CUSTOMER SUMMARY (AI-Powered Narrative)
 # ════════════════════════════════════════════════════════════════
 elif page == "🤖 Customer Summary":
     st.title("Customer 360 Profile")
     st.caption("Page 2 of 4 · Customer_Summary")
-
+ 
     st.info(
         "🤖 **AI-Powered Customer Briefing** — Search any customer ID below "
         "to get a complete A-Z summary including risk flags and recommended "
         "banker actions, generated automatically from live banking data.",
         icon="🤖"
     )
-
+ 
+    # ── Genie AI Assistant — companion link ───────────────────────
+    GENIE_URL = "https://dbc-14b24849-51f2.cloud.databricks.com/genie/rooms/01f169470bfb1fd5b782cf196674831d?o=7474654242294589"
+ 
+    st.markdown(
+        f"""
+        <div style="background-color:#1A1D24; border:1px solid #2D3139;
+        border-radius:10px; padding:16px 20px; margin-bottom:20px;">
+            <div style="font-size:16px; font-weight:600; color:#FAFAFA; margin-bottom:6px;">
+                💬 Ask Customer 360 AI Assistant
+            </div>
+            <div style="font-size:13px; color:#9CA3AF; margin-bottom:10px;">
+                Ask any question about any customer in plain English —
+                powered by Databricks Genie. Requires a free Databricks login.
+            </div>
+            <a href="{GENIE_URL}" target="_blank"
+               style="display:inline-block; background-color:#00BC8C; color:white;
+               padding:8px 18px; border-radius:6px; text-decoration:none;
+               font-weight:600; font-size:14px;">
+               ➤ Open AI Assistant in new tab
+            </a>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+ 
     customers = get_customer_list()
     selected = st.selectbox(
         "🔍 Search Customer by ID or Name",
@@ -263,7 +277,7 @@ elif page == "🤖 Customer Summary":
         format_func=lambda x: f"{x} — {customers.loc[customers['customer_id']==x, 'full_name'].values[0]}",
         key="page2_customer"
     )
-
+ 
     if selected:
         with st.spinner("Generating customer briefing..."):
             row = run_query(f"""
@@ -271,14 +285,14 @@ elif page == "🤖 Customer Summary":
                 FROM customer_360.gold.customer_full_summary
                 WHERE customer_id = '{selected}'
             """).iloc[0]
-
+ 
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("Customer Name",    row["full_name"])
         c2.metric("Credit Score",     int(row["credit_score"]))
         c3.metric("Total Balance",    f"${row['total_balance']:,.0f}")
         c4.metric("Engagement Score", int(row["engagement_score"]))
         c5.metric("Churn Risk Score", int(row["churn_risk_score"]))
-
+ 
         st.divider()
         st.subheader("Complete Customer Summary")
         st.markdown(
@@ -289,14 +303,14 @@ elif page == "🤖 Customer Summary":
             </div>""",
             unsafe_allow_html=True
         )
-
+ 
 # ════════════════════════════════════════════════════════════════
 # PAGE 3 — CUSTOMER SEGMENTATION (Portfolio View)
 # ════════════════════════════════════════════════════════════════
 elif page == "📊 Customer Segmentation":
     st.title("Customer 360 Profile")
     st.caption("Page 3 of 4 · Customer_Segmentation")
-
+ 
     with st.spinner("Loading segmentation data..."):
         seg_overview = run_query("""
             SELECT primary_segment, COUNT(*) AS total_customers,
@@ -306,21 +320,21 @@ elif page == "📊 Customer Segmentation":
             FROM customer_360.gold.customer_segments
             GROUP BY primary_segment
         """)
-
+ 
     seg_colors = {
         "Affluent": BLUE, "Mass Market": ORANGE,
         "Digital Champion": GREEN, "At-Risk": RED
     }
-
+ 
     # ── 4 KPI cards ──────────────────────────────────────────────
     cols = st.columns(4)
     for i, seg in enumerate(["Affluent", "Mass Market", "Digital Champion", "At-Risk"]):
         row = seg_overview[seg_overview["primary_segment"] == seg]
         val = int(row["total_customers"].values[0]) if not row.empty else 0
         cols[i].metric(f"{seg}", f"{val:,}")
-
+ 
     st.divider()
-
+ 
     # ── Row 1: Distribution | Avg Balance ────────────────────────
     col_l, col_r = st.columns(2)
     with col_l:
@@ -330,7 +344,7 @@ elif page == "📊 Customer Segmentation":
         fig.update_layout(template="plotly_dark", plot_bgcolor="#1A1D24",
                           paper_bgcolor="#1A1D24", height=350, showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
-
+ 
     with col_r:
         fig = px.bar(seg_overview, x="primary_segment", y="avg_balance",
                     color="primary_segment", title="Average Balance by Segment",
@@ -338,7 +352,7 @@ elif page == "📊 Customer Segmentation":
         fig.update_layout(template="plotly_dark", plot_bgcolor="#1A1D24",
                           paper_bgcolor="#1A1D24", height=350, showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
-
+ 
     # ── Row 2: Churn Risk | Engagement ────────────────────────────
     col_l2, col_r2 = st.columns(2)
     with col_l2:
@@ -348,7 +362,7 @@ elif page == "📊 Customer Segmentation":
         fig.update_layout(template="plotly_dark", plot_bgcolor="#1A1D24",
                           paper_bgcolor="#1A1D24", height=300, showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
-
+ 
     with col_r2:
         fig = px.bar(seg_overview, x="primary_segment", y="avg_engagement",
                     color="primary_segment", title="Engagement Score by Segment",
@@ -356,16 +370,16 @@ elif page == "📊 Customer Segmentation":
         fig.update_layout(template="plotly_dark", plot_bgcolor="#1A1D24",
                           paper_bgcolor="#1A1D24", height=300, showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
-
+ 
     st.divider()
-
+ 
     # ── Customer list with segment filter ─────────────────────────
     st.subheader("Customer List by Segment")
     segment_filter = st.selectbox(
         "Segment",
         options=["All"] + sorted(seg_overview["primary_segment"].tolist())
     )
-
+ 
     where_clause = "" if segment_filter == "All" else f"WHERE primary_segment = '{segment_filter}'"
     cust_list = run_query(f"""
         SELECT customer_id, full_name, city, primary_segment,
@@ -379,8 +393,7 @@ elif page == "📊 Customer Segmentation":
     """)
     st.dataframe(cust_list, use_container_width=True, hide_index=True)
     st.caption(f"Showing {len(cust_list)} of {segment_filter if segment_filter != 'All' else 'all'} customers (max 200 rows)")
-
-
+ 
 # ════════════════════════════════════════════════════════════════
 # PAGE 4 — PRODUCT RECOMMENDATIONS (Action Board)
 # ════════════════════════════════════════════════════════════════
@@ -563,3 +576,4 @@ elif page == "🎯 Product Recommendations":
             LIMIT 200
         """)
         st.dataframe(full_list, use_container_width=True, hide_index=True)
+ 
