@@ -310,23 +310,36 @@ if page == "📋 Customer 360":
 
         st.divider()
 
-        # ── Activity Feed ────────────────────────────────────────
+       # ── Activity Feed ────────────────────────────────────────
         st.subheader("Activity Feed")
         activity = run_query(f"""
-            SELECT when_label, event_description, amount,
-                   direction, channel, event_status,
-                   event_category, event_type, event_datetime
+            SELECT
+                CASE
+                    WHEN event_date = current_date()               THEN 'Today'
+                    WHEN event_date = DATE_SUB(current_date(), 1)  THEN 'Yesterday'
+                    WHEN event_date >= DATE_SUB(current_date(), 7) THEN 'This week'
+                    ELSE DATE_FORMAT(event_date, 'dd MMM yyyy')
+                END AS when_label,
+                event_description,
+                amount,
+                direction,
+                channel,
+                event_status,
+                event_category,
+                event_type,
+                event_datetime
             FROM customer_360.gold.activity_feed
             WHERE customer_id = '{selected}'
             ORDER BY
-              CASE WHEN amount IS NULL THEN 1 ELSE 0 END ASC,
-              event_datetime DESC
+                CASE WHEN amount IS NULL THEN 1 ELSE 0 END ASC,
+                event_datetime DESC
             LIMIT 30
         """)
         if not activity.empty:
             st.dataframe(activity, use_container_width=True, hide_index=True)
         else:
             st.info("No activity recorded for this customer")
+
 
 # ════════════════════════════════════════════════════════════════
 # PAGE 2 — CUSTOMER SUMMARY (AI-Powered Narrative)
